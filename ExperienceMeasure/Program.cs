@@ -11,7 +11,7 @@ namespace ExperienceMeasureCSharp
     class Program
     {
         // This string should contain the path to the repositories you would like to analyse
-        const string PATH_WITH_REPOSITORIES = @"E:\repositories\top10repos";
+        const string PATH_WITH_REPOSITORIES = @"E:\repositories\first500repos";
 
         // This string should contain where you want the CSV output
         const string CSV_OUTPUT_PATH = @"E:\repositories\mre_results.csv";
@@ -147,7 +147,10 @@ namespace ExperienceMeasureCSharp
         }
 
         long largestValue() {
-            return daysOfExperienceWithinRepository.Max();
+            if (numberOfAuthorsConsidered() > 0) {  // Throws if list is empty
+                return daysOfExperienceWithinRepository.Max();
+            }
+            return 0; // No authors considered
         }
            
         // Authors with at least two commits and a full day between them
@@ -156,20 +159,26 @@ namespace ExperienceMeasureCSharp
         }
 
         long smallestValue() {
-            return daysOfExperienceWithinRepository.Min();
+            if (numberOfAuthorsConsidered() > 0){ // Throws if list is empty
+                return daysOfExperienceWithinRepository.Min();
+            }
+
+            return 0; // No authors considered
         }
 
         public long averageIntDivision() {
-            int consideredAuthors = numberOfAuthorsConsidered();
-            if (consideredAuthors > 0) {    // Prevents division by zero
-                return daysOfExperienceWithinRepository.Sum() / consideredAuthors;
+            if (numberOfAuthorsConsidered() > 0) {    // Prevents division by zero
+                return daysOfExperienceWithinRepository.Sum() / numberOfAuthorsConsidered();
             }
-            throw new InvalidOperationException(String.Format("No authors considered for repository: {0}", repositoryName));
+            return 0; // No authors considered
         }
 
         double averageWithDecimals()
         {
-            return daysOfExperienceWithinRepository.Average();
+            if (numberOfAuthorsConsidered() > 0) {
+                return daysOfExperienceWithinRepository.Average();
+            }
+            return 0; // No authors considered
         }
 
         long middleValue()
@@ -179,16 +188,16 @@ namespace ExperienceMeasureCSharp
                 daysOfExperienceWithinRepository.Sort();
                 return daysOfExperienceWithinRepository.ElementAt(consideredAuthors/2);
             }
-            throw new InvalidOperationException(String.Format("No authors considered for repository: {0}", repositoryName));
+            return 0; // No authors considered
         }
 
         // Order: 
         //  repository name,
         //  number of authors considered,
-        //  mean (int division),
-        //  smallest value
+        //  smallest value,
         //  middle value (number of authors/2)
-        //  largest value
+        //  largest value,
+        //  mean (int division)
 
         public string toCSV() {
             return string.Join(",", repositoryName, numberOfAuthorsConsidered(), 
