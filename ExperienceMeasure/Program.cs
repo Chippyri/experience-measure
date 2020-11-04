@@ -19,8 +19,8 @@ namespace ExperienceMeasureCSharp
         // This queue stores the names of the repositories for the threads to pick their next work from
         static ConcurrentQueue<string> repoPaths = new ConcurrentQueue<string>();
 
-        // Stores the repository name and mean value for the repository
-        static ConcurrentDictionary<string, long> repoMeanValues = new ConcurrentDictionary<string, long>();
+        // Stores the repository data for CSV output
+        static SynchronizedCollection<RepositoryData> repositoryDatas = new SynchronizedCollection<RepositoryData>();
 
         // A filter for LibGit2Sharp to reverse the list of commits when looking for the first commit by a contributor
         static CommitFilter reverseFilter = new CommitFilter()
@@ -52,32 +52,37 @@ namespace ExperienceMeasureCSharp
             }
 
             // Write results to file
+            // Order: 
+            //  repository name,
+            //  number of authors considered,
+            //  smallest value
+            //  middle value (number of authors/2)
+            //  largest value
+            //  mean (int division)
             using (StreamWriter file = new System.IO.StreamWriter(outputFile))
             {
-                file.WriteLine("repo,mean_value");  // CSV-format header
-                foreach (var repoPair in repoMeanValues) {
-                    file.WriteLine(String.Format("{0},{1}", repoPair.Key, repoPair.Value)); // CSV-entries
+                file.WriteLine("repo,authors,smallest,middle,largest,mean");  // CSV-format header
+                foreach (var repoData in repositoryDatas) {
+                    file.WriteLine(repoData.toCSV()); // CSV-entries
                 }
                 file.Flush();
                 file.Close();
             }
         }
 
-        private static long CalculateMeanExperienceForRepository(string pathToSpecificRepo)
+        private static RepositoryData GetRepositoryExperienceData(string repositoryName, string pathToSpecificRepo)
         {
             // Open the repository using the LibGit2Sharp library
             using (var repo = new Repository(pathToSpecificRepo))
             {
-                // Collect all author names into a set
+                RepositoryData repositoryData = new RepositoryData(repositoryName);
+
+                // Collect all author names into a temporary set, these are not stored
                 HashSet<string> uniqueAuthors = new HashSet<string>();
                 foreach (Commit c in repo.Commits)
                 {
                     uniqueAuthors.Add(c.Author.Name.ToString());
                 }
-
-                // Values to store experience for each author and calculate a mean sum for the repository
-                long totalDays = 0;
-                long totalAuthorsConsidered = 0;
 
                 // Get first and last commit for each eligible author and add it up
                 foreach (string author in uniqueAuthors)
@@ -95,18 +100,11 @@ namespace ExperienceMeasureCSharp
                     // at least a day since their first commit
                     if (daysSinceFirstCommit >= 1)
                     {
-                        totalDays += daysSinceFirstCommit;
-                        totalAuthorsConsidered++;
+                        repositoryData.addValueToList(daysSinceFirstCommit);
                     }
                 }
-
-                long meanValue = 0;
-                if (totalAuthorsConsidered > 0) // Prevents division by zero if all authors were ineligible
-                {
-                    meanValue = totalDays / totalAuthorsConsidered;
-                }
                 
-                return meanValue;
+                return repositoryData;
             }
         }
 
@@ -119,16 +117,82 @@ namespace ExperienceMeasureCSharp
             while (repoPaths.TryDequeue(out repositoryPath))
             {
                 string repositoryName = new DirectoryInfo(repositoryPath).Name;
-                Thread.Sleep(0);
-                long meanValue = CalculateMeanExperienceForRepository(repositoryPath);
-                Console.WriteLine(string.Format("Thread {0}: {1}, mean: {2}", Thread.CurrentThread.ManagedThreadId, repositoryName, meanValue));
-                repoMeanValues.TryAdd(repositoryName, meanValue);
+                RepositoryData repositoryData = GetRepositoryExperienceData(repositoryName, repositoryPath);
+                Thread.Sleep(0);    // Makes printing cleaner
+                Console.WriteLine(string.Format("Thread {0}: {1}, mean: {2}", Thread.CurrentThread.ManagedThreadId, repositoryName, repositoryData.averageIntDivision()));
+                repositoryDatas.Add(repositoryData);
             }
         }
 
         static void Main(string[] args)
         {
             EvaluateRepositories(CSV_OUTPUT_PATH);
+        }
+    }
+
+    class RepositoryData {
+        private string repositoryName;
+        private List<long> daysOfExperienceWithinRepository;    // == number of counted contributors
+
+        public RepositoryData(string repositoryName) {
+            this.repositoryName = repositoryName;
+            daysOfExperienceWithinRepository = new List<long>();
+        }
+
+        public void addValueToList(long value) {
+            // A value of 0 is invalid
+            if (value > 0) {
+                daysOfExperienceWithinRepository.Add(value);
+            }
+        }
+
+        long largestValue() {
+            return daysOfExperienceWithinRepository.Max();
+        }
+           
+        // Authors with at least two commits and a full day between them
+        int numberOfAuthorsConsidered() {
+            return daysOfExperienceWithinRepository.Count();
+        }
+
+        long smallestValue() {
+            return daysOfExperienceWithinRepository.Min();
+        }
+
+        public long averageIntDivision() {
+            int consideredAuthors = numberOfAuthorsConsidered();
+            if (consideredAuthors > 0) {    // Prevents division by zero
+                return daysOfExperienceWithinRepository.Sum() / consideredAuthors;
+            }
+            throw new InvalidOperationException(String.Format("No authors considered for repository: {0}", repositoryName));
+        }
+
+        double averageWithDecimals()
+        {
+            return daysOfExperienceWithinRepository.Average();
+        }
+
+        long middleValue()
+        {
+            int consideredAuthors = numberOfAuthorsConsidered();
+            if (consideredAuthors > 0) {    // Prevents division by zero
+                daysOfExperienceWithinRepository.Sort();
+                return daysOfExperienceWithinRepository.ElementAt(consideredAuthors/2);
+            }
+            throw new InvalidOperationException(String.Format("No authors considered for repository: {0}", repositoryName));
+        }
+
+        // Order: 
+        //  repository name,
+        //  number of authors considered,
+        //  mean (int division),
+        //  smallest value
+        //  middle value (number of authors/2)
+        //  largest value
+
+        public string toCSV() {
+            return string.Join(",", repositoryName, numberOfAuthorsConsidered(), 
+                smallestValue(), middleValue(), largestValue(), averageIntDivision());
         }
     }
 }
